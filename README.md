@@ -2,6 +2,8 @@
 
 Time-Off microservice built with NestJS and SQLite for handling request lifecycle and keeping balances synchronized with an external HCM.
 
+Repository: https://github.com/PapoDeJacare/time-off-service
+
 The service is written in TypeScript and runs on Node.js (JavaScript runtime).
 
 ## Scope
