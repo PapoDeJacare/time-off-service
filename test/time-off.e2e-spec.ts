@@ -381,6 +381,106 @@ describe('Time-Off service (e2e)', () => {
     );
   });
 
+  it('returns 503 and keeps request submitted when HCM is unavailable', async () => {
+    hcmServer.setBalance('emp-7', 'loc-1', 6);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/hcm/sync/realtime')
+      .send({
+        employeeId: 'emp-7',
+        locationId: 'loc-1',
+        availableDays: 6,
+      })
+      .expect(201);
+
+    const createdRequest = await request(app.getHttpServer())
+      .post('/api/v1/time-off/requests')
+      .send({
+        employeeId: 'emp-7',
+        locationId: 'loc-1',
+        startDate: '2026-07-10',
+        endDate: '2026-07-11',
+        daysRequested: 2,
+      })
+      .expect(201);
+
+    const createdRequestBody = createdRequest.body as { id: string };
+    const requestId = createdRequestBody.id;
+
+    await hcmServer.stop();
+
+    try {
+      await request(app.getHttpServer())
+        .post(`/api/v1/time-off/requests/${requestId}/approve`)
+        .send({ managerId: 'mgr-outage-1' })
+        .expect(503);
+
+      const storedRequest = await request(app.getHttpServer())
+        .get(`/api/v1/time-off/requests/${requestId}`)
+        .expect(200);
+
+      const storedRequestBody = storedRequest.body as {
+        status?: string;
+      };
+
+      expect(storedRequestBody.status).toBe('SUBMITTED');
+    } finally {
+      await hcmServer.start();
+    }
+  });
+
+  it('rejects a submitted request without changing local balance', async () => {
+    hcmServer.setBalance('emp-8', 'loc-2', 7);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/hcm/sync/realtime')
+      .send({
+        employeeId: 'emp-8',
+        locationId: 'loc-2',
+        availableDays: 7,
+      })
+      .expect(201);
+
+    const createdRequest = await request(app.getHttpServer())
+      .post('/api/v1/time-off/requests')
+      .send({
+        employeeId: 'emp-8',
+        locationId: 'loc-2',
+        startDate: '2026-08-20',
+        endDate: '2026-08-21',
+        daysRequested: 2,
+      })
+      .expect(201);
+
+    const createdRequestBody = createdRequest.body as { id: string };
+    const requestId = createdRequestBody.id;
+
+    const rejectedRequest = await request(app.getHttpServer())
+      .post(`/api/v1/time-off/requests/${requestId}/reject`)
+      .send({ managerId: 'mgr-8', reason: 'Team needs coverage this period.' })
+      .expect(201);
+
+    const rejectedRequestBody = rejectedRequest.body as {
+      status?: string;
+      rejectionReason?: string;
+    };
+
+    expect(rejectedRequestBody.status).toBe('REJECTED');
+    expect(rejectedRequestBody.rejectionReason).toBe(
+      'Team needs coverage this period.',
+    );
+
+    const localBalance = await request(app.getHttpServer())
+      .get('/api/v1/balances/emp-8/loc-2')
+      .expect(200);
+
+    const localBalanceBody = localBalance.body as {
+      availableDays?: number;
+    };
+
+    expect(localBalanceBody.availableDays).toBe(7);
+  });
+
   it('supports idempotent request creation', async () => {
     hcmServer.setBalance('emp-4', 'loc-2', 5);
 
